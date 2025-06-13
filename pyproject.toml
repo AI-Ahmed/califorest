@@ -12,8 +12,6 @@ authors = [
     {name = "Yubin Park", email = "yubin.park@gmail.com"},
     {name = "Ahmed Nabil Atwa", email = "drahmedna.ai@gmail.com"}
 ]
-homepage = "https://github.com/AI-Ahmed/califorest"
-repository = "https://github.com/AI-Ahmed/califorest"
 keywords = []
 classifiers = [
     "Programming Language :: Python :: 3",
