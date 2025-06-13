@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "califorest"
+version = "0.0.1"
+description = "A Cloned Repository of the Calibrated Random Forest with CP"
+readme = "README.md"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "Yubin Park", email = "yubin.park@gmail.com"},
+    {name = "Ahmed Nabil Atwa", email = "drahmedna.ai@gmail.com"}
+]
+homepage = "https://github.com/AI-Ahmed/califorest"
+repository = "https://github.com/AI-Ahmed/califorest"
+keywords = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "scikit-learn",  # Updated from 'sklearn' to proper package name
+]
+
+[project.urls]
+Homepage = "https://github.com/AI-Ahmed/califorest"
+Repository = "https://github.com/AI-Ahmed/califorest"
+Issues = "https://github.com/AI-Ahmed/califorest/issues"
+
+[tool.setuptools.packages.find]
+# Equivalent to find_packages() in setup.py
+where = ["."]
+include = ["califorest*"]
+exclude = ["tests*"]
+
+[tool.setuptools.package-data]
+# Equivalent to include_package_data=True in setup.py
+"*" = ["*.txt", "*.md"] 
