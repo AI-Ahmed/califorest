@@ -57,6 +57,18 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         Whether to enable verbose logging during training.
     random_state : int or None, default=None
         Random state seed for reproducibility.
+    **forest_kwargs : dict
+        Additional keyword arguments passed to RandomForestClassifier constructor.
+        Common parameters include:
+        - criterion : {"gini", "entropy"}, default="gini"
+            The function to measure the quality of a split.
+        - max_features : {"sqrt", "log2", None, int, float}, default="sqrt"
+            The number of features to consider when looking for the best split.
+        - bootstrap : bool, default=True
+            Whether bootstrap samples are used when building trees.
+        - class_weight : dict, list of dict or "balanced", default=None
+            Weights associated with classes for handling imbalanced datasets.
+        - And other RandomForestClassifier constructor parameters.
         
     Attributes
     ----------
@@ -82,10 +94,21 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
     >>> from sklearn.datasets import make_classification
     >>> X, y = make_classification(n_samples=1000, n_features=10, 
     ...                           n_classes=2, random_state=42)
+    >>> # Basic usage
     >>> clf = CalibratedForest(n_estimators=50, random_state=42)
     >>> clf.fit(X, y)
     >>> probabilities = clf.predict_proba(X)
     >>> predictions = clf.predict(X)
+    >>> 
+    >>> # With additional forest parameters
+    >>> clf_advanced = CalibratedForest(
+    ...     n_estimators=50, 
+    ...     criterion='entropy',
+    ...     class_weight='balanced',
+    ...     max_features='log2',
+    ...     random_state=42
+    ... )
+    >>> clf_advanced.fit(X, y)
     
     References
     ----------
@@ -104,7 +127,8 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         ctype: Literal["isotonic", "logistic"] = "isotonic",
         test_size: float = DEFAULT_TEST_SIZE,
         verbose: bool = False,
-        random_state: Optional[int] = None
+        random_state: Optional[int] = None,
+        **forest_kwargs
     ) -> None:
         """Initialize the CalibratedForest classifier."""
         # Validate parameters
@@ -122,6 +146,7 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         self.test_size = test_size
         self.verbose = verbose
         self.random_state = random_state
+        self.forest_kwargs = forest_kwargs
         
         # Initialize attributes
         self.model_: Optional[RandomForestClassifier] = None
@@ -207,13 +232,8 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
             # This should never happen due to validation, but keeping for safety
             raise ValueError(f"Unsupported calibration type: {self.ctype}")
     
-    def _create_model(self, **forest_kwargs) -> RandomForestClassifier:
+    def _create_model(self) -> RandomForestClassifier:
         """Create the random forest model.
-        
-        Parameters
-        ----------
-        **forest_kwargs : dict
-            Additional keyword arguments to pass to RandomForestClassifier constructor.
         
         Returns
         -------
@@ -226,15 +246,14 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
             min_samples_split=self.min_samples_split,
             min_samples_leaf=self.min_samples_leaf,
             random_state=self.random_state,
-            **forest_kwargs
+            **self.forest_kwargs
         )
     
     def fit(
         self, 
         X: NDArray, 
         y: NDArray, 
-        *args, 
-        **kwargs
+        sample_weight: Optional[NDArray] = None
     ) -> 'CalibratedForest':
         """Fit the calibrated random forest.
         
@@ -244,26 +263,8 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
             Training features.
         y : NDArray of shape (n_samples,)
             Training labels (binary: 0 or 1).
-        *args : tuple
-            Additional positional arguments passed to RandomForestClassifier.
-        **kwargs : dict
-            Additional keyword arguments for RandomForestClassifier and fit methods.
-            These are automatically separated into:
-            
-            **Forest initialization parameters** (passed to RandomForestClassifier.__init__):
-            - criterion : {"gini", "entropy"}, default="gini"
-                The function to measure the quality of a split.
-            - max_features : {"sqrt", "log2", None, int, float}, default="sqrt"
-                The number of features to consider when looking for the best split.
-            - bootstrap : bool, default=True
-                Whether bootstrap samples are used when building trees.
-            - class_weight : dict, list of dict or "balanced", default=None
-                Weights associated with classes for handling imbalanced datasets.
-            - And other RandomForestClassifier constructor parameters.
-            
-            **Forest fitting parameters** (passed to RandomForestClassifier.fit):
-            - sample_weight : array-like of shape (n_samples,), default=None
-                Sample weights for training.
+        sample_weight : array-like of shape (n_samples,), default=None
+            Sample weights for training.
             
         Returns
         -------
@@ -297,24 +298,17 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
             logger.info(f"Starting training with {X.shape[0]} samples and {X.shape[1]} features")
             logger.info(f"Using {self.ctype} calibration with test_size={self.test_size}")
         
-        # Separate kwargs into forest initialization and fitting parameters
-        FOREST_FIT_PARAMS = {'sample_weight'}
-        
-        forest_kwargs = {k: v for k, v in kwargs.items() if k not in FOREST_FIT_PARAMS}
-        fit_params = {k: v for k, v in kwargs.items() if k in FOREST_FIT_PARAMS}
-        
         # Validate sample_weight if provided
-        if 'sample_weight' in fit_params and fit_params['sample_weight'] is not None:
-            sample_weight = np.asarray(fit_params['sample_weight'])
+        if sample_weight is not None:
+            sample_weight = np.asarray(sample_weight)
             if sample_weight.shape[0] != X.shape[0]:
                 raise ValueError(
                     f"sample_weight has {sample_weight.shape[0]} samples, "
                     f"but X has {X.shape[0]} samples"
                 )
-            fit_params['sample_weight'] = sample_weight
         
         # Create model and calibrator
-        self.model_ = self._create_model(**forest_kwargs)
+        self.model_ = self._create_model()
         self.calibrator_ = self._setup_calibrator()
         
         # Split data for training and calibration
@@ -324,9 +318,9 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         split_params = {'test_size': self.test_size, 'random_state': self.random_state, 'stratify': y}
         
         # Handle sample weights in split if provided
-        if 'sample_weight' in fit_params and fit_params['sample_weight'] is not None:
+        if sample_weight is not None:
             X_train, X_cal, y_train, y_cal, sw_train, sw_cal = train_test_split(
-                X, y, fit_params['sample_weight'], **split_params
+                X, y, sample_weight, **split_params
             )
             train_fit_params = {'sample_weight': sw_train}
         else:
@@ -450,7 +444,8 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
             'ctype': self.ctype,
             'test_size': self.test_size,
             'verbose': self.verbose,
-            'random_state': self.random_state
+            'random_state': self.random_state,
+            **self.forest_kwargs
         }
     
     def set_params(self, **params) -> 'CalibratedForest':

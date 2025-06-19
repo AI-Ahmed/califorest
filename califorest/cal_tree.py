@@ -63,6 +63,18 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
         Whether to enable verbose logging during training.
     random_state : int or None, default=None
         Random state seed for reproducibility.
+    **tree_kwargs : dict
+        Additional keyword arguments passed to DecisionTreeClassifier constructor.
+        Common parameters include:
+        - class_weight : dict, list of dict or "balanced", default=None
+            Weights associated with classes for handling imbalanced datasets.
+        - ccp_alpha : non-negative float, default=0.0
+            Complexity parameter for Minimal Cost-Complexity Pruning.
+        - max_leaf_nodes : int, default=None
+            Maximum number of leaf nodes for tree complexity control.
+        - min_impurity_decrease : float, default=0.0
+            Minimum impurity decrease required for node splitting.
+        - And other DecisionTreeClassifier constructor parameters.
         
     Attributes
     ----------
@@ -92,10 +104,20 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
     >>> from sklearn.datasets import make_classification
     >>> X, y = make_classification(n_samples=1000, n_features=10, 
     ...                           n_classes=2, random_state=42)
+    >>> # Basic usage
     >>> clf = CalibratedTree(n_estimators=100, random_state=42)
     >>> clf.fit(X, y)
     >>> probabilities = clf.predict_proba(X)
     >>> predictions = clf.predict(X)
+    >>> 
+    >>> # With additional tree parameters
+    >>> clf_advanced = CalibratedTree(
+    ...     n_estimators=100, 
+    ...     class_weight='balanced',
+    ...     ccp_alpha=0.01,
+    ...     random_state=42
+    ... )
+    >>> clf_advanced.fit(X, y)
     
     References
     ----------
@@ -114,7 +136,8 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
         alpha0: float = DEFAULT_ALPHA0,
         beta0: float = DEFAULT_BETA0,
         verbose: bool = False,
-        random_state: Optional[int] = None
+        random_state: Optional[int] = None,
+        **tree_kwargs
     ) -> None:
         """Initialize the CalibratedTree classifier."""
         # Validate parameters
@@ -134,6 +157,7 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
         self.beta0 = beta0
         self.verbose = verbose
         self.random_state = random_state
+        self.tree_kwargs = tree_kwargs
         
         # Initialize attributes
         self.estimators_: List[DecisionTreeClassifier] = []
@@ -231,14 +255,8 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
             # This should never happen due to validation, but keeping for safety
             raise ValueError(f"Unsupported calibration type: {self.ctype}")
     
-    def _create_estimators(self, **tree_kwargs) -> List[DecisionTreeClassifier]:
+    def _create_estimators(self) -> List[DecisionTreeClassifier]:
         """Create the ensemble of decision tree estimators.
-        
-        Parameters
-        ----------
-        **tree_kwargs : dict
-            Additional keyword arguments to pass to DecisionTreeClassifier constructor.
-            Common parameters include class_weight, ccp_alpha, max_leaf_nodes, etc.
         
         Returns
         -------
@@ -254,7 +272,7 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
                 max_features="sqrt",  # More efficient than "auto"
                 random_state=self.random_state if self.random_state is None 
                             else self.random_state + i,
-                **tree_kwargs
+                **self.tree_kwargs
             )
             for i in range(self.n_estimators)
         ]
@@ -410,8 +428,8 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
         self, 
         X: NDArray, 
         y: NDArray, 
-        *args, 
-        **kwargs
+        sample_weight: Optional[NDArray] = None,
+        check_input: bool = True
     ) -> 'CalibratedTree':
         """Fit the calibrated tree ensemble.
         
@@ -421,29 +439,11 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
             Training features.
         y : NDArray of shape (n_samples,)
             Training labels (binary: 0 or 1).
-        *args : tuple
-            Additional positional arguments passed to individual tree estimators.
-        **kwargs : dict
-            Additional keyword arguments for DecisionTreeClassifier instances.
-            These are automatically separated into:
-            
-            **Tree initialization parameters** (passed to DecisionTreeClassifier.__init__):
-            - class_weight : dict, list of dict or "balanced", default=None
-                Weights associated with classes for handling imbalanced datasets.
-            - ccp_alpha : non-negative float, default=0.0
-                Complexity parameter for Minimal Cost-Complexity Pruning.
-            - max_leaf_nodes : int, default=None
-                Maximum number of leaf nodes for tree complexity control.
-            - min_impurity_decrease : float, default=0.0
-                Minimum impurity decrease required for node splitting.
-            - And other DecisionTreeClassifier constructor parameters.
-            
-            **Tree fitting parameters** (passed to DecisionTreeClassifier.fit):
-            - sample_weight : array-like of shape (n_samples,), default=None
-                Sample weights for training. If provided, each sample will be 
-                weighted accordingly during bootstrap sampling and tree training.
-            - check_input : bool, default=True
-                Allow to bypass input checking for performance optimization.
+        sample_weight : array-like of shape (n_samples,), default=None
+            Sample weights for training. If provided, each sample will be 
+            weighted accordingly during bootstrap sampling and tree training.
+        check_input : bool, default=True
+            Allow to bypass input checking for performance optimization.
             
         Returns
         -------
@@ -480,25 +480,24 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
         # Setup calibrator
         self.calibrator_ = self._setup_calibrator()
         
-        # Separate kwargs into tree initialization and fitting parameters
-        # Known fitting parameters for DecisionTreeClassifier.fit()
-        TREE_FIT_PARAMS = {'sample_weight', 'check_input'}
-        
-        tree_kwargs = {k: v for k, v in kwargs.items() if k not in TREE_FIT_PARAMS}
-        fit_params = {k: v for k, v in kwargs.items() if k in TREE_FIT_PARAMS}
-        
         # Validate sample_weight if provided
-        if 'sample_weight' in fit_params and fit_params['sample_weight'] is not None:
-            sample_weight = np.asarray(fit_params['sample_weight'])
+        if sample_weight is not None:
+            sample_weight = np.asarray(sample_weight)
             if sample_weight.shape[0] != X.shape[0]:
                 raise ValueError(
                     f"sample_weight has {sample_weight.shape[0]} samples, "
                     f"but X has {X.shape[0]} samples"
                 )
-            fit_params['sample_weight'] = sample_weight
         
-        # Create estimators with additional tree parameters
-        self.estimators_ = self._create_estimators(**tree_kwargs)
+        # Create fit parameters dictionary
+        fit_params = {}
+        if sample_weight is not None:
+            fit_params['sample_weight'] = sample_weight
+        if not check_input:
+            fit_params['check_input'] = check_input
+        
+        # Create estimators
+        self.estimators_ = self._create_estimators()
         
         # Calculate OOB predictions and statistics
         (mean_predictions, prediction_variances, 
@@ -630,7 +629,8 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
             'alpha0': self.alpha0,
             'beta0': self.beta0,
             'verbose': self.verbose,
-            'random_state': self.random_state
+            'random_state': self.random_state,
+            **self.tree_kwargs
         }
     
     def set_params(self, **params) -> 'CalibratedTree':
