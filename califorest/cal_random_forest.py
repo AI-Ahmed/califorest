@@ -112,10 +112,8 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
     
     References
     ----------
-    .. [1] Platt, J. (1999). Probabilistic outputs for support vector machines 
-           and comparisons to regularized likelihood methods.
-    .. [2] Zadrozny, B. & Elkan, C. (2002). Transforming classifier scores 
-           into accurate multiclass probability estimates.
+    .. [1] Y. Park and J. C. Ho. 2020. **CaliForest: Calibrated Random Forest for Health Data**.
+           *ACM Conference on Health, Inference, and Learning (2020)*
     """
     
     def __init__(
