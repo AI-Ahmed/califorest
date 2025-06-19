@@ -11,8 +11,8 @@ from sklearn.metrics import roc_auc_score
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import PolynomialFeatures
-from califorest import CaliForest
-from califorest import RC30
+from califorest import CalibratedForest
+from califorest import CalibratedTree
 from califorest import metrics as em
 import mimic_extract as mimic
 
@@ -54,22 +54,22 @@ def init_models(n_estimators, max_depth):
 
     mss = 3
     msl = 1
-    models = {"CF-Iso": CaliForest(n_estimators=n_estimators,
+    models = {"CF-Iso": CalibratedTree(n_estimators=n_estimators,
                                         max_depth=max_depth,
                                         min_samples_split=mss,
                                         min_samples_leaf=msl,
                                         ctype="isotonic"),
-            "CF-Logit": CaliForest(n_estimators=n_estimators,
+            "CF-Logit": CalibratedTree(n_estimators=n_estimators,
                                         max_depth=max_depth,
                                         min_samples_split=mss,
                                         min_samples_leaf=msl,
                                         ctype="logistic"),
-            "RC-Iso": RC30(n_estimators=n_estimators,
+            "RC-Iso": CalibratedForest(n_estimators=n_estimators,
                                         max_depth=max_depth,
                                         min_samples_split=mss,
                                         min_samples_leaf=msl,
                                         ctype="isotonic"),
-            "RC-Logit": RC30(n_estimators=n_estimators,
+            "RC-Logit": CalibratedForest(n_estimators=n_estimators,
                                         max_depth=max_depth,
                                         min_samples_split=mss,
                                         min_samples_leaf=msl,

@@ -1,4 +1,4 @@
-from .califorest import CaliForest
-from .rc30 import RC30
+from .cal_tree import CalibratedTree
+from .cal_random_forest import CalibratedForest
 
-__all__ = ["CaliForest", "RC30"]
+__all__ = ["CalibratedTree", "CalibratedForest"]

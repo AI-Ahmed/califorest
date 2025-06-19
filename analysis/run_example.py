@@ -3,8 +3,7 @@ from sklearn.datasets import make_hastie_10_2
 from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import PolynomialFeatures
-from califorest import CaliForest
-from califorest import RC30
+from califorest import CalibratedTree
 from califorest import metrics as em
 
 test_size = 0.3
@@ -23,7 +22,7 @@ y[y<0] = 0
 X_train, X_test, y_train, y_test = train_test_split(X, y, 
                                             test_size=0.3)
 
-model = CaliForest(n_estimators=n_estimators,
+model = CalibratedTree(n_estimators=n_estimators,
                     max_depth=max_depth,
                     min_samples_split=mss,
                     min_samples_leaf=msl,
