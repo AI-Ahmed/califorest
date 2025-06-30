@@ -167,7 +167,6 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         self.n_outputs_: Optional[int] = None
         self.feature_importances_: Optional[NDArray] = None
         self.estimators_: Optional[List] = None
-        self.estimators_samples_: Optional[List] = None
         self.is_fitted_: bool = False
     
     def _validate_init_parameters(
@@ -355,7 +354,6 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         # Set derived attributes from the fitted model
         self.feature_importances_ = self.model_.feature_importances_
         self.estimators_ = self.model_.estimators_
-        self.estimators_samples_ = self.model_.estimators_samples_
         
         if self.verbose:
             logger.info(f"Calibrating on {X_cal.shape[0]} samples...")

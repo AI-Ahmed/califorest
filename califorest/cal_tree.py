@@ -174,8 +174,6 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
         self.is_fitted_: bool = False
         self.classes_: Optional[NDArray] = None
         self.n_classes_: Optional[int] = None
-        self.n_outputs_: Optional[int] = None
-        self.feature_importances_: Optional[NDArray] = None
     
     def _validate_init_parameters(
         self,
