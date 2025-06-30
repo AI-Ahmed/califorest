@@ -84,6 +84,14 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
         The fitted calibration model.
     n_features_in_ : int
         Number of features seen during fit.
+    classes_ : NDArray
+        The classes labels (always [0, 1] for binary classification).
+    n_classes_ : int
+        The number of classes (always 2 for binary classification).
+    n_outputs_ : int
+        The number of outputs (always 1 for binary classification).
+    feature_importances_ : NDArray
+        The averaged feature importances across all estimators.
     is_fitted_ : bool
         Whether the model has been fitted.
         
@@ -164,6 +172,10 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
         self.calibrator_: Optional[Union[LogisticRegression, IsotonicRegression]] = None
         self.n_features_in_: Optional[int] = None
         self.is_fitted_: bool = False
+        self.classes_: Optional[NDArray] = None
+        self.n_classes_: Optional[int] = None
+        self.n_outputs_: Optional[int] = None
+        self.feature_importances_: Optional[NDArray] = None
     
     def _validate_init_parameters(
         self,
@@ -470,8 +482,10 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
         if not np.array_equal(unique_labels, [0, 1]):
             raise ValueError(f"Labels must be 0 and 1, got {unique_labels}")
         
-        # Store number of features
+        # Store number of features and classes
         self.n_features_in_ = X.shape[1]
+        self.classes_ = unique_labels
+        self.n_classes_ = len(unique_labels)
         
         if self.verbose:
             logger.info(f"Starting training with {X.shape[0]} samples and {X.shape[1]} features")
@@ -658,4 +672,128 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
         params = self.get_params()
         param_str = ', '.join([f"{k}={v}" for k, v in params.items()])
         return f"CalibratedTree({param_str})"
+    
+    @property
+    def feature_importances_(self) -> NDArray:
+        """Return the feature importances averaged over all estimators.
+        
+        Returns
+        -------
+        NDArray of shape (n_features,)
+            The feature importances. Higher values indicate more important features.
+            
+        Raises
+        ------
+        AttributeError
+            If the model has not been fitted yet.
+        """
+        check_is_fitted(self, 'is_fitted_')
+        
+        if not self.estimators_:
+            raise AttributeError("Feature importances are not available before fitting")
+        
+        # Average feature importances across all estimators
+        importances = np.zeros(self.n_features_in_, dtype=np.float64)
+        
+        for estimator in self.estimators_:
+            importances += estimator.feature_importances_
+        
+        return importances / len(self.estimators_)
+    
+    @property 
+    def n_outputs_(self) -> int:
+        """Number of outputs when fit is called.
+        
+        Returns
+        -------
+        int
+            Number of outputs (always 1 for binary classification).
+        """
+        return 1
+    
+    def decision_function(self, X: NDArray) -> NDArray:
+        """Compute the decision function of X.
+        
+        Parameters
+        ----------
+        X : NDArray of shape (n_samples, n_features)
+            Input features.
+            
+        Returns
+        -------
+        NDArray of shape (n_samples,)
+            The decision function of the input samples. The order of the
+            classes corresponds to that in the attribute classes_.
+        """
+        # Get probability of positive class and convert to decision scores
+        probabilities = self.predict_proba(X)
+        # Convert probabilities to decision scores (log-odds)
+        positive_proba = probabilities[:, 1]
+        # Avoid log(0) by clipping
+        positive_proba = np.clip(positive_proba, 1e-15, 1 - 1e-15)
+        return np.log(positive_proba / (1 - positive_proba))
+    
+    def apply(self, X: NDArray) -> NDArray:
+        """Apply trees in the ensemble to X, return leaf indices.
+        
+        Parameters
+        ----------
+        X : NDArray of shape (n_samples, n_features)
+            Input features.
+            
+        Returns
+        -------
+        NDArray of shape (n_samples, n_estimators)
+            For each datapoint x in X and for each tree in the ensemble,
+            return the index of the leaf x ends up in.
+        """
+        check_is_fitted(self, 'is_fitted_')
+        X = check_array(X, accept_sparse=False)
+        
+        if X.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"X has {X.shape[1]} features, but CalibratedTree was fitted with "
+                f"{self.n_features_in_} features"
+            )
+        
+        # Apply each estimator to get leaf indices
+        leaf_indices = np.zeros((X.shape[0], len(self.estimators_)), dtype=np.int64)
+        
+        for idx, estimator in enumerate(self.estimators_):
+            leaf_indices[:, idx] = estimator.apply(X)
+        
+        return leaf_indices
+    
+    def decision_path(self, X: NDArray) -> List:
+        """Return the decision path in the ensemble.
+        
+        Parameters
+        ----------
+        X : NDArray of shape (n_samples, n_features)
+            Input features.
+            
+        Returns
+        -------
+        List
+            List of sparse matrices indicating the decision paths for each estimator.
+            Each matrix has shape (n_samples, n_nodes) where entry (i, j) is 1 
+            if sample i goes through node j.
+        """
+        check_is_fitted(self, 'is_fitted_')
+        X = check_array(X, accept_sparse=False)
+        
+        if X.shape[1] != self.n_features_in_:
+            raise ValueError(
+                f"X has {X.shape[1]} features, but CalibratedTree was fitted with "
+                f"{self.n_features_in_} features"
+            )
+        
+        # Get decision paths for each estimator
+        decision_paths = []
+        
+        for idx, estimator in enumerate(self.estimators_):
+            indicator = estimator.decision_path(X)
+            decision_paths.append(indicator)
+        
+        return decision_paths
     

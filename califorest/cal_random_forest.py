@@ -5,7 +5,7 @@ This module implements a calibrated random forest classifier that uses
 train-test split for probability calibration.
 """
 
-from typing import Optional, Union, Literal
+from typing import Optional, Union, Literal, List
 
 import numpy as np
 from numpy.typing import NDArray
@@ -78,6 +78,18 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         The fitted calibration model.
     n_features_in_ : int
         Number of features seen during fit.
+    classes_ : NDArray
+        The classes labels (always [0, 1] for binary classification).
+    n_classes_ : int
+        The number of classes (always 2 for binary classification).
+    n_outputs_ : int
+        The number of outputs (always 1 for binary classification).
+    feature_importances_ : NDArray
+        The feature importances from the underlying RandomForestClassifier.
+    estimators_ : List[DecisionTreeClassifier]
+        The collection of fitted decision tree estimators from the forest.
+    estimators_samples_ : List
+        The subset of drawn samples for each base estimator.
     is_fitted_ : bool
         Whether the model has been fitted.
         
@@ -150,6 +162,12 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         self.model_: Optional[RandomForestClassifier] = None
         self.calibrator_: Optional[Union[LogisticRegression, IsotonicRegression]] = None
         self.n_features_in_: Optional[int] = None
+        self.classes_: Optional[NDArray] = None
+        self.n_classes_: Optional[int] = None
+        self.n_outputs_: Optional[int] = None
+        self.feature_importances_: Optional[NDArray] = None
+        self.estimators_: Optional[List] = None
+        self.estimators_samples_: Optional[List] = None
         self.is_fitted_: bool = False
     
     def _validate_init_parameters(
@@ -289,8 +307,11 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         if not np.array_equal(unique_labels, [0, 1]):
             raise ValueError(f"Labels must be 0 and 1, got {unique_labels}")
         
-        # Store number of features
+        # Store number of features and classes
         self.n_features_in_ = X.shape[1]
+        self.classes_ = unique_labels
+        self.n_classes_ = len(unique_labels)
+        self.n_outputs_ = 1
         
         if self.verbose:
             logger.info(f"Starting training with {X.shape[0]} samples and {X.shape[1]} features")
@@ -330,6 +351,11 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         
         # Train the random forest
         self.model_.fit(X_train, y_train, **train_fit_params)
+        
+        # Set derived attributes from the fitted model
+        self.feature_importances_ = self.model_.feature_importances_
+        self.estimators_ = self.model_.estimators_
+        self.estimators_samples_ = self.model_.estimators_samples_
         
         if self.verbose:
             logger.info(f"Calibrating on {X_cal.shape[0]} samples...")
@@ -471,5 +497,126 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         params = self.get_params()
         param_str = ', '.join([f"{k}={v}" for k, v in params.items()])
         return f"CalibratedForest({param_str})"
-
-
+    
+    def decision_function(self, X: NDArray) -> NDArray:
+        """Compute the decision function of X.
+        
+        Parameters
+        ----------
+        X : NDArray of shape (n_samples, n_features)
+            Input features.
+            
+        Returns
+        -------
+        NDArray of shape (n_samples,)
+            The decision function of the input samples. The order of the
+            classes corresponds to that in the attribute classes_.
+        """
+        # Get probability of positive class and convert to decision scores
+        probabilities = self.predict_proba(X)
+        # Convert probabilities to decision scores (log-odds)
+        positive_proba = probabilities[:, 1]
+        # Avoid log(0) by clipping
+        positive_proba = np.clip(positive_proba, 1e-15, 1 - 1e-15)
+        return np.log(positive_proba / (1 - positive_proba))
+    
+    def apply(self, X: NDArray) -> NDArray:
+        """Apply trees in the forest to X, return leaf indices.
+        
+        Parameters
+        ----------
+        X : NDArray of shape (n_samples, n_features)
+            Input features.
+            
+        Returns
+        -------
+        NDArray of shape (n_samples, n_estimators)
+            For each datapoint x in X and for each tree in the forest,
+            return the index of the leaf x ends up in.
+        """
+        check_is_fitted(self, 'is_fitted_')
+        return self.model_.apply(X)
+    
+    def decision_path(self, X: NDArray) -> List:
+        """Return the decision path in the forest.
+        
+        Parameters
+        ----------
+        X : NDArray of shape (n_samples, n_features)
+            Input features.
+            
+        Returns
+        -------
+        List
+            List of sparse matrices indicating the decision paths for each tree.
+            Each matrix has shape (n_samples, n_nodes) where entry (i, j) is 1 
+            if sample i goes through node j.
+        """
+        check_is_fitted(self, 'is_fitted_')
+        
+        # Get decision paths for each tree in the forest
+        decision_paths = []
+        for estimator in self.estimators_:
+            indicator = estimator.decision_path(X)
+            decision_paths.append(indicator)
+        
+        return decision_paths
+    
+    @property
+    def n_estimators_(self) -> int:
+        """The number of estimators in the forest.
+        
+        Returns
+        -------
+        int
+            Number of trees in the forest.
+        """
+        check_is_fitted(self, 'is_fitted_')
+        return len(self.estimators_)
+    
+    @property
+    def estimators_samples_(self) -> List:
+        """The subset of drawn samples for each base estimator.
+        
+        Returns
+        -------
+        List
+            The subset of drawn samples for each base estimator from 
+            the underlying RandomForestClassifier.
+        """
+        check_is_fitted(self, 'is_fitted_')
+        return self.model_.estimators_samples_
+    
+    @property
+    def oob_score_(self) -> float:
+        """Score of the training dataset obtained using an out-of-bag estimate.
+        
+        Returns
+        -------
+        float
+            Out-of-bag score from the underlying RandomForestClassifier.
+            Only available if oob_score=True was passed to the constructor.
+        """
+        check_is_fitted(self, 'is_fitted_')
+        if not hasattr(self.model_, 'oob_score_'):
+            raise AttributeError(
+                "OOB score not available. Set oob_score=True in forest_kwargs to enable."
+            )
+        return self.model_.oob_score_
+    
+    @property
+    def oob_decision_function_(self) -> NDArray:
+        """Decision function computed with out-of-bag estimate on the training set.
+        
+        Returns
+        -------
+        NDArray of shape (n_samples, n_classes)
+            Out-of-bag decision function from the underlying RandomForestClassifier.
+            Only available if oob_score=True was passed to the constructor.
+        """
+        check_is_fitted(self, 'is_fitted_')
+        if not hasattr(self.model_, 'oob_decision_function_'):
+            raise AttributeError(
+                "OOB decision function not available. Set oob_score=True in forest_kwargs to enable."
+            )
+        return self.model_.oob_decision_function_
