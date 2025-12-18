@@ -473,6 +473,10 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
     def set_params(self, **params) -> 'CalibratedForest':
         """Set the parameters of this estimator.
         
+        This method handles both direct parameters of CalibratedForest and
+        parameters that should be passed to the underlying RandomForestClassifier
+        via forest_kwargs.
+        
         Parameters
         ----------
         **params : dict
@@ -482,12 +486,49 @@ class CalibratedForest(ClassifierMixin, BaseEstimator):
         -------
         CalibratedForest
             The estimator instance.
+            
+        Raises
+        ------
+        ValueError
+            If an invalid parameter is provided.
+            
+        Notes
+        -----
+        Parameters are categorized as follows:
+        - Direct CalibratedForest parameters: n_estimators, max_depth, 
+          min_samples_split, min_samples_leaf, ctype, test_size, verbose, 
+          random_state
+        - RandomForestClassifier parameters: All other valid sklearn 
+          RandomForestClassifier parameters are stored in forest_kwargs
         """
+        # Define the direct parameters of CalibratedForest
+        direct_params = {
+            'n_estimators', 'max_depth', 'min_samples_split', 'min_samples_leaf',
+            'ctype', 'test_size', 'verbose', 'random_state', 'forest_kwargs'
+        }
+        
+        # Get valid RandomForestClassifier parameters from a dummy instance
+        # This ensures we only accept valid sklearn parameters
+        from sklearn.ensemble import RandomForestClassifier
+        dummy_rf = RandomForestClassifier()
+        valid_rf_params = set(dummy_rf.get_params(deep=False).keys())
+        
         for key, value in params.items():
-            if hasattr(self, key):
+            if key in direct_params:
+                # Set direct CalibratedForest parameters
                 setattr(self, key, value)
+            elif key in valid_rf_params:
+                # Set RandomForestClassifier parameters in forest_kwargs
+                if not hasattr(self, 'forest_kwargs') or self.forest_kwargs is None:
+                    self.forest_kwargs = {}
+                self.forest_kwargs[key] = value
             else:
-                raise ValueError(f"Invalid parameter {key}")
+                # Invalid parameter
+                raise ValueError(
+                    f"Invalid parameter '{key}' for estimator CalibratedForest. "
+                    f"Valid parameters are: {sorted(direct_params | valid_rf_params)}"
+                )
+        
         return self
     
     def __repr__(self) -> str:

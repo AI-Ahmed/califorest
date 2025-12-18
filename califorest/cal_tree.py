@@ -648,6 +648,10 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
     def set_params(self, **params) -> 'CalibratedTree':
         """Set the parameters of this estimator.
         
+        This method handles both direct parameters of CalibratedTree and
+        parameters that should be passed to the underlying DecisionTreeClassifier
+        via tree_kwargs.
+        
         Parameters
         ----------
         **params : dict
@@ -657,12 +661,50 @@ class CalibratedTree(ClassifierMixin, BaseEstimator):
         -------
         CalibratedTree
             The estimator instance.
+            
+        Raises
+        ------
+        ValueError
+            If an invalid parameter is provided.
+            
+        Notes
+        -----
+        Parameters are categorized as follows:
+        - Direct CalibratedTree parameters: n_estimators, criterion, max_depth,
+          min_samples_split, min_samples_leaf, ctype, alpha0, beta0, verbose,
+          random_state
+        - DecisionTreeClassifier parameters: All other valid sklearn
+          DecisionTreeClassifier parameters are stored in tree_kwargs
         """
+        # Define the direct parameters of CalibratedTree
+        direct_params = {
+            'n_estimators', 'criterion', 'max_depth', 'min_samples_split',
+            'min_samples_leaf', 'ctype', 'alpha0', 'beta0', 'verbose',
+            'random_state', 'tree_kwargs'
+        }
+        
+        # Get valid DecisionTreeClassifier parameters from a dummy instance
+        # This ensures we only accept valid sklearn parameters
+        from sklearn.tree import DecisionTreeClassifier
+        dummy_tree = DecisionTreeClassifier()
+        valid_tree_params = set(dummy_tree.get_params(deep=False).keys())
+        
         for key, value in params.items():
-            if hasattr(self, key):
+            if key in direct_params:
+                # Set direct CalibratedTree parameters
                 setattr(self, key, value)
+            elif key in valid_tree_params:
+                # Set DecisionTreeClassifier parameters in tree_kwargs
+                if not hasattr(self, 'tree_kwargs') or self.tree_kwargs is None:
+                    self.tree_kwargs = {}
+                self.tree_kwargs[key] = value
             else:
-                raise ValueError(f"Invalid parameter {key}")
+                # Invalid parameter
+                raise ValueError(
+                    f"Invalid parameter '{key}' for estimator CalibratedTree. "
+                    f"Valid parameters are: {sorted(direct_params | valid_tree_params)}"
+                )
+        
         return self
     
     def __repr__(self) -> str:
